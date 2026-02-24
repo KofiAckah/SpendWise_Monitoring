@@ -181,3 +181,55 @@ resource "aws_iam_instance_profile" "app_profile" {
   name = "${var.project_name}-${var.environment}-app-profile"
   role = aws_iam_role.app_role.name
 }
+
+# SSM read permissions for App Server to fetch parameters at deploy time
+resource "aws_iam_role_policy" "app_ssm_read" {
+  name = "${var.project_name}-${var.environment}-app-ssm-read"
+  role = aws_iam_role.app_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = "arn:aws:ssm:*:*:parameter/${var.project_name}/${var.environment}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# SSM read permissions for Jenkins Server to manage parameters in the pipeline
+resource "aws_iam_role_policy" "jenkins_ssm_read" {
+  name = "${var.project_name}-${var.environment}-jenkins-ssm-read"
+  role = aws_iam_role.jenkins_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = "arn:aws:ssm:*:*:parameter/${var.project_name}/${var.environment}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+      }
+    ]
+  })
+}

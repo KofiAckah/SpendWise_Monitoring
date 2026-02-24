@@ -47,3 +47,13 @@ output "app_instance_id" {
   description = "Instance ID of the App Server"
   value       = module.compute.app_instance_id
 }
+
+output "parameter_store_path" {
+  description = "Parameter Store path prefix for application configuration"
+  value       = module.parameters.parameter_path_prefix
+}
+
+output "parameter_names" {
+  description = "Map of parameter names in Parameter Store"
+  value       = module.parameters.parameter_names
+}

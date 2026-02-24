@@ -52,6 +52,25 @@ module "ecr" {
   environment  = var.environment
 }
 
+# ==============================================
+# Parameter Store Module
+# ==============================================
+module "parameters" {
+  source = "./parameters"
+
+  project_name         = var.project_name
+  environment          = var.environment
+  postgres_db          = var.postgres_db
+  postgres_user        = var.postgres_user
+  postgres_password    = var.postgres_password
+  backend_port         = var.backend_port
+  db_host              = var.db_host
+  db_port              = var.db_port
+  compose_project_name = var.compose_project_name
+  frontend_port        = var.frontend_port
+  common_tags          = var.common_tags
+}
+
 module "compute" {
   source = "./compute"
 
@@ -77,6 +96,8 @@ ${module.compute.app_public_ip} ansible_user=ec2-user ansible_ssh_private_key_fi
 
 [all:vars]
 ansible_python_interpreter=/usr/bin/python3
+aws_region=${var.aws_region}
+app_env=${var.environment}
 EOT
   filename = "${path.module}/../Ansible/inventory.ini"
 

@@ -1,0 +1,143 @@
+---
+- name: Configure Jenkins Server
+  hosts: jenkins_server
+  become: yes
+
+  vars:
+    jenkins_repo_url: "https://pkg.jenkins.io/redhat-stable/jenkins.repo"
+    jenkins_key_url: "https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key"
+
+  tasks:
+    # ==============================================
+    # Swap Space (Jenkins needs extra memory)
+    # ==============================================
+    - name: Check if swap file exists
+      stat:
+        path: /swapfile
+      register: swap_file
+
+    - name: Create swap file (2GB)
+      command: dd if=/dev/zero of=/swapfile bs=1M count=2048
+      when: not swap_file.stat.exists
+
+    - name: Set permissions on swap file
+      file:
+        path: /swapfile
+        mode: '0600'
+
+    - name: Format swap file
+      command: mkswap /swapfile
+      when: not swap_file.stat.exists
+
+    - name: Enable swap file
+      command: swapon /swapfile
+      when: not swap_file.stat.exists
+
+    - name: Add swap to fstab
+      mount:
+        path: none
+        src: /swapfile
+        fstype: swap
+        opts: sw
+        state: present
+
+    # ==============================================
+    # System Update & Base Packages
+    # ==============================================
+    - name: Update all packages
+      dnf:
+        name: "*"
+        state: latest
+
+    - name: Install Java 17 (Amazon Corretto)
+      dnf:
+        name: java-17-amazon-corretto-devel
+        state: present
+
+    # ==============================================
+    # Jenkins Installation
+    # ==============================================
+    - name: Download Jenkins repository
+      get_url:
+        url: "{{ jenkins_repo_url }}"
+        dest: /etc/yum.repos.d/jenkins.repo
+
+    - name: Import Jenkins GPG key
+      rpm_key:
+        state: present
+        key: "{{ jenkins_key_url }}"
+
+    - name: Install Jenkins, Git, and Docker
+      dnf:
+        name:
+          - jenkins
+          - git
+          - docker
+        state: present
+
+    # ==============================================
+    # Docker Compose Plugin
+    # ==============================================
+    - name: Create Docker CLI plugins directory
+      file:
+        path: /usr/local/lib/docker/cli-plugins
+        state: directory
+        mode: '0755'
+
+    - name: Download Docker Compose plugin
+      get_url:
+        url: "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64"
+        dest: /usr/local/lib/docker/cli-plugins/docker-compose
+        mode: '0755'
+
+    - name: Download Docker Buildx plugin
+      get_url:
+        url: "https://github.com/docker/buildx/releases/download/v0.21.0/buildx-v0.21.0.linux-amd64"
+        dest: /usr/local/lib/docker/cli-plugins/docker-buildx
+        mode: '0755'
+
+    # ==============================================
+    # Service Management
+    # ==============================================
+    - name: Start and enable Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Start and enable Jenkins service
+      service:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Add 'jenkins' user to 'docker' group
+      user:
+        name: jenkins
+        groups: docker
+        append: yes
+
+    - name: Add 'ec2-user' to 'docker' group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+
+    - name: Restart Jenkins to apply group changes
+      service:
+        name: jenkins
+        state: restarted
+
+    # ==============================================
+    # Summary
+    # ==============================================
+    - name: Display Jenkins access information
+      debug:
+        msg:
+          - "================================================"
+          - "Jenkins Server Configured Successfully!"
+          - "================================================"
+          - "Jenkins URL: http://{{ ansible_host }}:8080"
+          - "To get the initial admin password run:"
+          - "  sudo cat /var/lib/jenkins/secrets/initialAdminPassword"
+          - "================================================"

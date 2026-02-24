@@ -39,3 +39,4 @@ Thumbs.db
 *.tfvars.json
 # Exception: example.tfvars is safe to commit (no real secrets)
 !example.tfvars
+ansible.log
