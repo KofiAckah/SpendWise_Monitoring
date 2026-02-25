@@ -78,10 +78,12 @@ module "compute" {
   environment              = var.environment
   jenkins_instance_type    = var.jenkins_instance_type
   app_instance_type        = var.app_instance_type
+  monitoring_instance_type = var.monitoring_instance_type
   key_name                 = aws_key_pair.main.key_name
   public_subnet_id         = module.networking.public_subnet_id
   jenkins_sg_id            = module.security.jenkins_sg_id
   app_sg_id                = module.security.app_sg_id
+  monitoring_sg_id         = module.security.monitoring_sg_id
   jenkins_instance_profile = module.security.jenkins_profile_name
   app_instance_profile     = module.security.app_profile_name
 }
@@ -94,10 +96,22 @@ ${module.compute.jenkins_public_ip} ansible_user=ec2-user ansible_ssh_private_ke
 [app_server]
 ${module.compute.app_public_ip} ansible_user=ec2-user ansible_ssh_private_key_file=./${aws_key_pair.main.key_name}.pem
 
+# -------------------------------------------------------
+# Monitoring Node  (Ubuntu 24.04 LTS EC2)
+# -------------------------------------------------------
+[monitoring_server]
+${module.compute.monitoring_server_public_ip} ansible_user=ubuntu ansible_ssh_private_key_file=./${aws_key_pair.main.key_name}.pem
+
 [all:vars]
 ansible_python_interpreter=/usr/bin/python3
 aws_region=${var.aws_region}
 app_env=${var.environment}
+
+# -------------------------------------------------------
+# Observability versions
+# -------------------------------------------------------
+prometheus_version=2.53.3
+node_exporter_version=1.8.2
 EOT
   filename = "${path.module}/../Ansible/inventory.ini"
 

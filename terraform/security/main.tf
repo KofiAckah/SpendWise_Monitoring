@@ -95,6 +95,78 @@ resource "aws_security_group" "app_sg" {
   }
 }
 
+# ==============================================
+# Monitoring Security Group
+# Prometheus (9090), Grafana (3000), SSH (22)
+# Node Exporter scrape (9100) FROM monitoring SG
+# ==============================================
+resource "aws_security_group" "monitoring_sg" {
+  name        = "${var.project_name}-${var.environment}-monitoring-sg"
+  description = "Security group for Prometheus + Grafana monitoring server"
+  vpc_id      = var.vpc_id
+
+  # SSH – locked to your IP for administration
+  ingress {
+    description = "SSH from allowed IP"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.ssh_allowed_ip]
+  }
+
+  # Prometheus UI
+  ingress {
+    description = "Prometheus UI"
+    from_port   = 9090
+    to_port     = 9090
+    protocol    = "tcp"
+    cidr_blocks = [var.ssh_allowed_ip]
+  }
+
+  # Grafana UI
+  ingress {
+    description = "Grafana UI"
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-monitoring-sg"
+    Role = "observability"
+  }
+}
+
+# Allow monitoring server to scrape Node Exporter on app servers
+resource "aws_security_group_rule" "app_node_exporter_from_monitoring" {
+  type                     = "ingress"
+  description              = "Node Exporter scrape from Monitoring Server"
+  from_port                = 9100
+  to_port                  = 9100
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.monitoring_sg.id
+  security_group_id        = aws_security_group.app_sg.id
+}
+
+# Allow monitoring server to scrape SpendWise /metrics (port 5000)
+resource "aws_security_group_rule" "app_backend_metrics_from_monitoring" {
+  type                     = "ingress"
+  description              = "Prometheus scrape of /metrics from Monitoring Server"
+  from_port                = 5000
+  to_port                  = 5000
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.monitoring_sg.id
+  security_group_id        = aws_security_group.app_sg.id
+}
+
 # --- IAM Roles & Profiles ---
 
 # Jenkins Role
@@ -232,4 +304,145 @@ resource "aws_iam_role_policy" "jenkins_ssm_read" {
       }
     ]
   })
+}
+# CloudWatch Logs permissions for App Server (Docker awslogs driver)
+resource "aws_iam_role_policy" "app_cloudwatch_logs" {
+  name = "${var.project_name}-${var.environment}-app-cloudwatch-logs"
+  role = aws_iam_role.app_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams",
+          "logs:DescribeLogGroups"
+        ]
+        Resource = "arn:aws:logs:*:*:log-group:/aws/container/spendwise*"
+      }
+    ]
+  })
+}
+
+# --- Account Identity (used for CloudTrail bucket naming) ---
+data "aws_caller_identity" "current" {}
+
+# --- GuardDuty ---
+# Read existing detector — AWS only allows one per account/region
+data "aws_guardduty_detector" "main" {}
+
+resource "aws_guardduty_detector_feature" "s3_data_events" {
+  detector_id = data.aws_guardduty_detector.main.id
+  name        = "S3_DATA_EVENTS"
+  status      = "ENABLED"
+}
+
+resource "aws_guardduty_detector_feature" "ebs_malware_protection" {
+  detector_id = data.aws_guardduty_detector.main.id
+  name        = "EBS_MALWARE_PROTECTION"
+  status      = "ENABLED"
+}
+
+# --- CloudTrail S3 Bucket ---
+resource "aws_s3_bucket" "cloudtrail" {
+  bucket        = "${var.project_name}-${var.environment}-cloudtrail-${data.aws_caller_identity.current.account_id}"
+  force_destroy = false
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-cloudtrail"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [bucket]
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "cloudtrail" {
+  bucket                  = aws_s3_bucket.cloudtrail.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  rule {
+    id     = "glacier-transition"
+    status = "Enabled"
+
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+
+    expiration {
+      days = 365
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AWSCloudTrailAclCheck"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:GetBucketAcl"
+        Resource  = aws_s3_bucket.cloudtrail.arn
+      },
+      {
+        Sid       = "AWSCloudTrailWrite"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.cloudtrail.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+        Condition = {
+          StringEquals = {
+            "s3:x-amz-acl" = "bucket-owner-full-control"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# --- CloudTrail ---
+resource "aws_cloudtrail" "main" {
+  name                          = "${var.project_name}-${var.environment}-trail"
+  s3_bucket_name                = aws_s3_bucket.cloudtrail.id
+  include_global_service_events = true
+  is_multi_region_trail         = false
+  enable_log_file_validation    = true
+
+  depends_on = [aws_s3_bucket_policy.cloudtrail]
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-trail"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [name]
+  }
 }

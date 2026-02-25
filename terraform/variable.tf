@@ -74,6 +74,12 @@ variable "backend_port" {
   default     = "5000"
 }
 
+variable "monitoring_instance_type" {
+  description = "Instance type for the Monitoring Server (Prometheus + Grafana). Recommended: t3.small"
+  type        = string
+  default     = "t3.small"
+}
+
 variable "db_host" {
   description = "Database host (postgres for Docker Compose)"
   type        = string

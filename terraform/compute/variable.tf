@@ -47,3 +47,14 @@ variable "app_instance_profile" {
   description = "IAM Instance Profile for App"
   type        = string
 }
+
+variable "monitoring_instance_type" {
+  description = "Instance type for the Monitoring Server (Prometheus + Grafana). Recommended: t3.small"
+  type        = string
+  default     = "t3.small"
+}
+
+variable "monitoring_sg_id" {
+  description = "Security Group ID for the Monitoring Server"
+  type        = string
+}

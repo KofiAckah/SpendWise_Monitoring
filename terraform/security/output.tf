@@ -17,3 +17,8 @@ output "app_profile_name" {
   description = "IAM Instance Profile name for App"
   value       = aws_iam_instance_profile.app_profile.name
 }
+
+output "monitoring_sg_id" {
+  description = "Security Group ID for the Monitoring Server"
+  value       = aws_security_group.monitoring_sg.id
+}

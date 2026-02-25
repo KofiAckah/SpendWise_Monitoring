@@ -17,3 +17,13 @@ output "app_instance_id" {
   description = "Instance ID of the App Server"
   value       = aws_instance.app_server.id
 }
+
+output "monitoring_server_public_ip" {
+  description = "Public IP of the Monitoring Server (Prometheus + Grafana)"
+  value       = aws_instance.monitoring_server.public_ip
+}
+
+output "monitoring_server_instance_id" {
+  description = "Instance ID of the Monitoring Server"
+  value       = aws_instance.monitoring_server.id
+}

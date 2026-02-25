@@ -1,0 +1,91 @@
+# ==============================================================
+# prometheus.yml.j2  –  Prometheus scrape configuration
+# Managed by Ansible – DO NOT edit manually on the server
+# ==============================================================
+
+global:
+  scrape_interval:     15s   # How often Prometheus scrapes targets
+  evaluation_interval: 15s   # How often Prometheus evaluates rules
+  scrape_timeout:      10s
+
+  # Labels added to every time-series and alert this Prometheus emits
+  external_labels:
+    environment: "{{ app_env | default('dev') }}"
+    project:     "spendwise"
+    region:      "{{ aws_region | default('eu-central-1') }}"
+
+# ----- Alert rules ----
+rule_files:
+  - "{{ prometheus_config_dir | default('/etc/prometheus') }}/rules/alert_rules.yml"
+
+# ----- Alertmanager (configure when Alertmanager is deployed) -----
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # Replace [] with ["localhost:9093"] once Alertmanager is running
+
+# ==============================================================
+# Scrape configurations
+# ==============================================================
+scrape_configs:
+
+  # ---- Prometheus self-monitoring -------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          service: "prometheus"
+
+  # ---- SpendWise Backend API  (port 5000) -----------------
+  - job_name: "spendwise_backend"
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+{% for host in groups['app_server'] %}
+          - "{{ hostvars[host]['ansible_host'] | default(host) }}:{{ app_backend_port | default(5000) }}"
+{% endfor %}
+        labels:
+          service: "spendwise-backend"
+          environment: "{{ app_env | default('dev') }}"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex:        "([^:]+)(?::\\d+)?"
+        replacement:  "$1"
+
+  # ---- SpendWise App / Alternative port (8080) ------------
+  - job_name: "spendwise_app_8080"
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+{% for host in groups['app_server'] %}
+          - "{{ hostvars[host]['ansible_host'] | default(host) }}:{{ app_frontend_port | default(8080) }}"
+{% endfor %}
+        labels:
+          service: "spendwise-app"
+          environment: "{{ app_env | default('dev') }}"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex:        "([^:]+)(?::\\d+)?"
+        replacement:  "$1"
+
+  # ---- Node Exporter  (system-level metrics, port 9100) ---
+  - job_name: "node_exporter"
+    metrics_path: /metrics
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+{% for host in groups['app_server'] %}
+          - "{{ hostvars[host]['ansible_host'] | default(host) }}:{{ node_exporter_port | default(9100) }}"
+{% endfor %}
+        labels:
+          environment: "{{ app_env | default('dev') }}"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex:        "([^:]+)(?::\\d+)?"
+        replacement:  "$1"

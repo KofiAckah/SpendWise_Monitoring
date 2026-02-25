@@ -57,3 +57,18 @@ output "parameter_names" {
   description = "Map of parameter names in Parameter Store"
   value       = module.parameters.parameter_names
 }
+
+output "monitoring_server_public_ip" {
+  description = "Public IP of the Monitoring Server (Prometheus + Grafana)"
+  value       = module.compute.monitoring_server_public_ip
+}
+
+output "monitoring_server_instance_id" {
+  description = "Instance ID of the Monitoring Server"
+  value       = module.compute.monitoring_server_instance_id
+}
+
+output "monitoring_sg_id" {
+  description = "Security Group ID for the Monitoring Server"
+  value       = module.security.monitoring_sg_id
+}
