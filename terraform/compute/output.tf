@@ -32,3 +32,13 @@ output "app_server_private_ip" {
   description = "Private IP of the App Server – used by Prometheus for intra-VPC scraping"
   value       = aws_instance.app_server.private_ip
 }
+
+output "iam_role_name" {
+  description = "IAM role attached to the app server EC2 instance"
+  value       = aws_iam_role.spendwise_ec2_role.name
+}
+
+output "instance_profile_name" {
+  description = "IAM instance profile name attached to the app server"
+  value       = aws_iam_instance_profile.ec2_profile.name
+}

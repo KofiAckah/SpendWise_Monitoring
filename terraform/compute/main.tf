@@ -43,10 +43,61 @@ resource "aws_instance" "app_server" {
   key_name               = var.key_name
   subnet_id              = var.public_subnet_id
   vpc_security_group_ids = [var.app_sg_id]
-  iam_instance_profile   = var.app_instance_profile
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
   tags = {
     Name = "${var.project_name}-${var.environment}-app-server"
+  }
+}
+
+# ==============================================
+# IAM Role for App Server – CloudWatch Logs + ECR + SSM
+# Grants the app EC2 instance permission to:
+#   - Write container logs via the Docker awslogs driver  → CloudWatchLogsFullAccess
+#   - Pull images from ECR                               → AmazonEC2ContainerRegistryReadOnly
+#   - Fetch secrets from Parameter Store                 → AmazonSSMReadOnlyAccess
+# ==============================================
+resource "aws_iam_role" "spendwise_ec2_role" {
+  name        = "spendwise-ec2-role"
+  description = "EC2 instance role for SpendWise app server"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-ec2-role"
+    Environment = var.environment
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_logs_full" {
+  role       = aws_iam_role.spendwise_ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "ecr_readonly" {
+  role       = aws_iam_role.spendwise_ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_readonly" {
+  role       = aws_iam_role.spendwise_ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
+}
+
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "spendwise-ec2-profile"
+  role = aws_iam_role.spendwise_ec2_role.name
+
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-ec2-profile"
+    Environment = var.environment
   }
 }
 
