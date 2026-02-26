@@ -1,80 +1,148 @@
 # ==============================================================
 # terraform/monitoring/main.tf
-# Provisions the SpendWise Grafana dashboard via the
-# grafana/grafana Terraform provider.
+# AWS observability resources for SpendWise:
+#   - CloudWatch Log Group  (/spendwise/app, 30-day retention)
+#   - S3 Bucket             (CloudTrail logs, AES256, 90-day expiry)
+#   - CloudTrail            (spendwise-trail, global events enabled)
+#   - GuardDuty Detector    (enabled, FIFTEEN_MINUTES publish frequency)
 #
-# The dashboard JSON is read from spendwise-dashboard.json
-# in this same directory (path.module).
-#
-# Prerequisite: Grafana must be running and reachable at
-#   var.grafana_url before this module is applied.
-#
-# Apply:
-#   terraform init
-#   terraform apply \
-#     -var="grafana_url=http://<monitoring_ip>:3000" \
-#     -var="grafana_api_key=<token>"
+# IMPORTANT – GuardDuty:
+#   AWS allows only ONE detector per account per region.
+#   If a detector already exists, import it before applying:
+#     terraform import -var-file=../dev.tfvars \
+#       module.monitoring.aws_guardduty_detector.main <detector-id>
 # ==============================================================
 
-terraform {
-  required_providers {
-    grafana = {
-      source  = "grafana/grafana"
-      version = "~> 3.0"
+# ---------------------------------------------------------------
+# Dynamic account / region lookup (avoids hard-coding)
+# ---------------------------------------------------------------
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# ==============================================================
+# CloudWatch Log Group – application logs
+# ==============================================================
+resource "aws_cloudwatch_log_group" "app" {
+  name              = "/spendwise/app"
+  retention_in_days = 30
+
+  tags = {
+    Name        = "/spendwise/app"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+# ==============================================================
+# S3 Bucket – CloudTrail log storage
+# ==============================================================
+resource "aws_s3_bucket" "cloudtrail" {
+  bucket        = "spendwise-cloudtrail-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true
+
+  tags = {
+    Name        = "spendwise-cloudtrail"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "cloudtrail" {
+  bucket                  = aws_s3_bucket.cloudtrail.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Server-side encryption using AES256
+resource "aws_s3_bucket_server_side_encryption_configuration" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
     }
   }
 }
 
-# ---------------------------------------------------------------
-# Provider – authenticates to the running Grafana instance.
-# Use a service-account token (Grafana ≥ 9) or a legacy API key.
-# ---------------------------------------------------------------
-provider "grafana" {
-  url  = var.grafana_url
-  auth = var.grafana_api_key
+# Lifecycle policy – expire logs after 90 days
+resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  rule {
+    id     = "expire-logs-after-90-days"
+    status = "Enabled"
+
+    expiration {
+      days = 90
+    }
+  }
 }
 
-# ---------------------------------------------------------------
-# Data source – Prometheus (already provisioned by Ansible).
-# We look it up so we can reference its UID if needed for
-# alerting rules or annotations in future resources.
-# ---------------------------------------------------------------
-data "grafana_data_source" "prometheus" {
-  name = "Prometheus"
+# Bucket policy – allow CloudTrail to write logs
+resource "aws_s3_bucket_policy" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  # public-access block must be in place before policy attachment
+  depends_on = [aws_s3_bucket_public_access_block.cloudtrail]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AWSCloudTrailAclCheck"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:GetBucketAcl"
+        Resource  = aws_s3_bucket.cloudtrail.arn
+      },
+      {
+        Sid       = "AWSCloudTrailWrite"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.cloudtrail.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+        Condition = {
+          StringEquals = {
+            "s3:x-amz-acl" = "bucket-owner-full-control"
+          }
+        }
+      }
+    ]
+  })
 }
 
-# ---------------------------------------------------------------
-# Grafana Dashboard – SpendWise RED Metrics + Infrastructure
-#
-# config_json is the raw Grafana dashboard JSON.
-# file() reads spendwise-dashboard.json from this module's path.
-# ---------------------------------------------------------------
-resource "grafana_dashboard" "spendwise" {
-  # Read the dashboard definition from the co-located JSON file.
-  config_json = file("${path.module}/spendwise-dashboard.json")
+# ==============================================================
+# CloudTrail – management event trail
+# ==============================================================
+resource "aws_cloudtrail" "main" {
+  name                          = "spendwise-trail"
+  s3_bucket_name                = aws_s3_bucket.cloudtrail.id
+  include_global_service_events = true
+  is_multi_region_trail         = false
+  enable_log_file_validation    = true
 
-  # Overwrite an existing dashboard with the same UID on re-apply.
-  overwrite = true
+  # Bucket policy must exist before the trail is created
+  depends_on = [aws_s3_bucket_policy.cloudtrail]
 
-  message = "Provisioned by Terraform – ${var.project_name} ${var.environment}"
+  tags = {
+    Name        = "spendwise-trail"
+    Environment = var.environment
+    Project     = var.project_name
+  }
 }
 
-# ---------------------------------------------------------------
-# Grafana Folder – logical grouping for SpendWise dashboards.
-# The dashboard above is placed in the General folder by default;
-# create a dedicated folder here and reference it if preferred.
-# ---------------------------------------------------------------
-resource "grafana_folder" "spendwise" {
-  title = "SpendWise – ${title(var.environment)}"
-  uid   = "spendwise-${var.environment}"
-}
+# ==============================================================
+# GuardDuty Detector
+# ==============================================================
+resource "aws_guardduty_detector" "main" {
+  enable                       = true
+  finding_publishing_frequency = "FIFTEEN_MINUTES"
 
-# ---------------------------------------------------------------
-# Grafana Dashboard in dedicated folder
-# (Alternative to the root dashboard above – choose one approach)
-# ---------------------------------------------------------------
-# resource "grafana_dashboard" "spendwise_in_folder" {
-#   folder      = grafana_folder.spendwise.id
-#   config_json = file("${path.module}/spendwise-dashboard.json")
-#   overwrite   = true
-# }
+  tags = {
+    Name        = "spendwise-guardduty"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}

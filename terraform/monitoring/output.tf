@@ -2,17 +2,17 @@
 # terraform/monitoring/output.tf
 # ==============================================================
 
-output "dashboard_url" {
-  description = "Direct URL to the provisioned SpendWise dashboard in Grafana."
-  value       = "${var.grafana_url}/d/${jsondecode(grafana_dashboard.spendwise.config_json).uid}/spendwise-red-metrics-and-infrastructure"
+output "cloudwatch_log_group_name" {
+  description = "Name of the CloudWatch Log Group for SpendWise application logs."
+  value       = aws_cloudwatch_log_group.app.name
 }
 
-output "dashboard_uid" {
-  description = "Unique identifier of the provisioned Grafana dashboard."
-  value       = jsondecode(grafana_dashboard.spendwise.config_json).uid
+output "cloudtrail_s3_bucket_name" {
+  description = "Name of the S3 bucket storing CloudTrail logs."
+  value       = aws_s3_bucket.cloudtrail.id
 }
 
-output "folder_uid" {
-  description = "UID of the SpendWise Grafana folder."
-  value       = grafana_folder.spendwise.uid
+output "guardduty_detector_id" {
+  description = "ID of the GuardDuty detector for this account/region."
+  value       = aws_guardduty_detector.main.id
 }

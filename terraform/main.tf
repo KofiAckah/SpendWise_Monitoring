@@ -89,6 +89,17 @@ module "compute" {
   app_instance_profile     = module.security.app_profile_name
 }
 
+# ==============================================================
+# Monitoring Module – CloudWatch, CloudTrail, GuardDuty
+# ==============================================================
+module "monitoring" {
+  source = "./monitoring"
+
+  project_name = var.project_name
+  environment  = var.environment
+  aws_region   = var.aws_region
+}
+
 resource "local_file" "ansible_inventory" {
   content  = <<EOT
 [jenkins_server]

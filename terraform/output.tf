@@ -72,3 +72,21 @@ output "monitoring_sg_id" {
   description = "Security Group ID for the Monitoring Server"
   value       = module.security.monitoring_sg_id
 }
+
+# ==============================================================
+# Monitoring module outputs (CloudWatch / CloudTrail / GuardDuty)
+# ==============================================================
+output "cloudwatch_log_group_name" {
+  description = "CloudWatch Log Group name for SpendWise application logs."
+  value       = module.monitoring.cloudwatch_log_group_name
+}
+
+output "cloudtrail_s3_bucket_name" {
+  description = "S3 bucket name used by the spendwise-trail CloudTrail."
+  value       = module.monitoring.cloudtrail_s3_bucket_name
+}
+
+output "guardduty_detector_id" {
+  description = "GuardDuty detector ID for this account/region."
+  value       = module.monitoring.guardduty_detector_id
+}
